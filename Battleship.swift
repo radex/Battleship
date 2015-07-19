@@ -1,17 +1,17 @@
 import Cocoa
 
-/// Matcher function (tells you if a point is inside a region)
-
-typealias RegionMatcher = CGPoint -> Bool
-
 /// Protocol for region types
 
 protocol RegionType {
-    var matcher: RegionMatcher { get }
+    /// Tells you if `point` is inside the region
+    func match(point: CGPoint) -> Bool
+    
+    /// Renders the region with Core Graphics
     func draw(bounds: CGRect)
 }
 
 extension RegionType {
+    // Renders the region using pixel sampling
     // Swift can't handle dynamic dispatch with protocol default implementations
     // so instances have to at least override draw and call sample
     func sample(bounds: CGRect) {
@@ -19,7 +19,7 @@ extension RegionType {
         
         for x in Int(bounds.origin.x)..<Int(bounds.origin.x + bounds.size.width) {
             for y in Int(bounds.origin.y)..<Int(bounds.origin.y + bounds.size.height) {
-                if matcher(CGPoint(x: x, y: y)) {
+                if match(CGPoint(x: x, y: y)) {
                     NSRectFill(NSRect(x: x, y: y, width: 1, height: 1))
                 }
             }
@@ -30,10 +30,10 @@ extension RegionType {
 /// Generic region that can take whatever matcher function you give it
 
 struct Region: RegionType {
-    let matcher: RegionMatcher
-
-    init(_ matcher: RegionMatcher) {
-        self.matcher = matcher
+    let matcher: CGPoint -> Bool
+    
+    func match(point: CGPoint) -> Bool {
+        return matcher(point)
     }
     
     func draw(bounds: CGRect) {
@@ -46,18 +46,12 @@ struct Region: RegionType {
 /// Region representing an offset transformation of another region
 
 struct OffsetRegion: RegionType {
+    let originalRegion: RegionType
     let dx: CGFloat
     let dy: CGFloat
-    let originalRegion: RegionType
-    let matcher: RegionMatcher
     
-    init(_ region: RegionType, dx: CGFloat, dy: CGFloat) {
-        self.dx = dx
-        self.dy = dy
-        self.originalRegion = region
-        self.matcher = { point in
-            return region.matcher(CGPoint(x: point.x - dx, y: point.y - dy))
-        }
+    func match(point: CGPoint) -> Bool {
+        return originalRegion.match(CGPoint(x: point.x - dx, y: point.y - dy))
     }
     
     func draw(bounds: CGRect) {
@@ -80,7 +74,7 @@ struct OffsetRegion: RegionType {
 
 extension RegionType {
     func offset(x: CGFloat, _ y: CGFloat) -> OffsetRegion {
-        return OffsetRegion(self, dx: x, dy: y)
+        return OffsetRegion(originalRegion: self, dx: x, dy: y)
     }
 }
 
@@ -89,14 +83,9 @@ extension RegionType {
 struct UnionRegion: RegionType {
     let originalRegion: RegionType
     let otherRegion: RegionType
-    let matcher: RegionMatcher
     
-    init(_ region: RegionType, _ other: RegionType) {
-        self.originalRegion = region
-        self.otherRegion = other
-        self.matcher = { point in
-            return region.matcher(point) || other.matcher(point)
-        }
+    func match(point: CGPoint) -> Bool {
+        return originalRegion.match(point) || otherRegion.match(point)
     }
     
     func draw(bounds: CGRect) {
@@ -109,7 +98,7 @@ struct UnionRegion: RegionType {
 
 extension RegionType {
     func plus(other: RegionType) -> UnionRegion {
-        return UnionRegion(self, other)
+        return UnionRegion(originalRegion: self, otherRegion: other)
     }
 }
 
@@ -118,14 +107,9 @@ extension RegionType {
 struct IntersectionRegion: RegionType {
     let originalRegion: RegionType
     let otherRegion: RegionType
-    let matcher: RegionMatcher
     
-    init(_ region: RegionType, _ other: RegionType) {
-        self.originalRegion = region
-        self.otherRegion = other
-        self.matcher = { point in
-            return region.matcher(point) && other.matcher(point)
-        }
+    func match(point: CGPoint) -> Bool {
+        return originalRegion.match(point) && otherRegion.match(point)
     }
     
     func draw(bounds: CGRect) {
@@ -154,7 +138,7 @@ struct IntersectionRegion: RegionType {
 
 extension RegionType {
     func intersection(other: RegionType) -> IntersectionRegion {
-        return IntersectionRegion(self, other)
+        return IntersectionRegion(originalRegion: self, otherRegion: other)
     }
 }
 
@@ -163,14 +147,9 @@ extension RegionType {
 struct DifferenceRegion: RegionType {
     let originalRegion: RegionType
     let otherRegion: RegionType
-    let matcher: RegionMatcher
     
-    init(_ region: RegionType, _ other: RegionType) {
-        self.originalRegion = region
-        self.otherRegion = other
-        self.matcher = { point in
-            return region.matcher(point) && !other.matcher(point)
-        }
+    func match(point: CGPoint) -> Bool {
+        return originalRegion.match(point) && !otherRegion.match(point)
     }
     
     func draw(bounds: CGRect) {
@@ -206,7 +185,7 @@ struct DifferenceRegion: RegionType {
 
 extension RegionType {
     func minus(other: RegionType) -> DifferenceRegion {
-        return DifferenceRegion(self, other)
+        return DifferenceRegion(originalRegion: self, otherRegion: other)
     }
 }
 
@@ -214,13 +193,13 @@ extension RegionType {
 
 struct Circle: RegionType {
     let radius: CGFloat
-    let matcher: RegionMatcher
     
     init(_ radius: CGFloat) {
         self.radius = radius
-        matcher = { point in
-            return sqrt(point.x * point.x + point.y * point.y) <= radius
-        }
+    }
+    
+    func match(point: CGPoint) -> Bool {
+        return sqrt(point.x * point.x + point.y * point.y) <= radius
     }
     
     func draw(bounds: CGRect) {
